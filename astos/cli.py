@@ -47,10 +47,17 @@ def main(full: bool, no_open: bool, root: str) -> None:
     cache.write_text(json.dumps(graph, ensure_ascii=False, indent=1), encoding="utf-8")
     generate(index, graph)
 
-    click.echo(
-        f"ASTOS :: {len(graph['nodes'])} nós · {len(graph['links'])} arestas "
-        f"-> {index} (100% offline, 3D imersivo)"
-    )
+    n, e = len(graph["nodes"]), len(graph["links"])
+    if n == 0:
+        click.echo(
+            "ASTOS :: AVISO: nenhum arquivo suportado (.py, .c, .h, .cpp, .hpp, .cc, .cxx) "
+            f"encontrado em {repo} — o grafo foi gerado vazio."
+        )
+    else:
+        click.echo(
+            f"ASTOS :: {n} nós · {e} arestas "
+            f"-> {index} (100% offline, 3D imersivo)"
+        )
     if not no_open:
         try:
             webbrowser.open(index.as_uri())

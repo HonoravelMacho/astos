@@ -122,6 +122,13 @@ html, body {{ margin: 0; height: 100%; background: var(--bg); color: var(--txt);
   max-height: 40vh; overflow-y: auto; }}
 #legend .mod {{ cursor: default; }}
 #legend b.tt {{ color: var(--cyan); font-size: 10px; letter-spacing: 2px; }}
+#empty {{ position: fixed; inset: 0; z-index: 90; display: none; align-items: center; justify-content: center;
+  text-align: center; pointer-events: none; }}
+#empty.show {{ display: flex; }}
+#empty .card {{ background: var(--panel); border: 1px solid rgba(251,191,36,0.5); border-radius: 10px;
+  padding: 26px 34px; max-width: 560px; box-shadow: 0 0 30px rgba(251,191,36,0.15); pointer-events: auto; }}
+#empty .big2 {{ color: var(--amber); letter-spacing: 3px; font-size: 15px; margin-bottom: 10px; }}
+#empty .small2 {{ color: var(--dim); font-size: 12px; line-height: 1.8; }}
 #boot {{ position: fixed; inset: 0; z-index: 200; background: var(--bg); display: flex;
   align-items: center; justify-content: center; flex-direction: column; gap: 10px;
   transition: opacity 0.5s; }}
@@ -191,6 +198,7 @@ html, body {{ margin: 0; height: 100%; background: var(--bg); color: var(--txt);
 </div>
 
 <div id="legend"></div>
+<div id="empty"><div class="card"><div class="big2">⚠ NENHUM CÓDIGO SUPORTADO ENCONTRADO</div><div class="small2" id="empty-msg"></div></div></div>
 <div id="info"><span class="x" id="info-x">[x]</span><div class="t" id="info-t"></div><div class="r" id="info-r"></div></div>
 <div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · clique num nó: HUD · ESC: sair do fullscreen</div>
 
@@ -210,6 +218,12 @@ const MOD_COLORS = {mods_json};
 const $ = (id) => document.getElementById(id);
 
 /* ================= estado ================= */
+if (!NODES.length) {{
+  $('empty-msg').innerHTML = 'Nenhum arquivo <b style="color:var(--txt)">.py · .c · .h · .cpp · .hpp · .cc · .cxx</b> ' +
+    'foi encontrado neste repositório.<br>Rode <b style="color:var(--cyan)">astos</b> dentro da pasta do código-fonte.';
+  $('empty').classList.add('show');
+  $('st-nodes').textContent = '0'; $('st-edges').textContent = '0';
+}}
 const state = {{
   phys: true, rotY: true, rotX: false, orbSpeed: 1.0, repulsion: 1.0,
   rgbGlobal: true, rgbSelect: true, flux: 1.0,
@@ -622,6 +636,7 @@ loop();
 setTimeout(() => {{
   $('boot').classList.add('gone');
   $('boot-msg').textContent = 'SISTEMA ONLINE';
+  setTimeout(() => {{ $('boot').style.display = 'none'; }}, 700);
 }}, 900);
 </script>
 </body>

@@ -7,8 +7,8 @@
 
 > **Observe a estrutura viva do seu código em 3D imersivo. Zero CDN. Puro WebGL Sci-Fi.**
 
-O **ASTOS** escaneia qualquer repositório Python via AST, mapeia módulos,
-importações e dependências diretas, e gera um mapa **3D orbital** (Three.js
+O **ASTOS** escaneia qualquer repositório **Python ou C/C++**, mapeia módulos,
+importações/`#include`s e dependências diretas, e gera um mapa **3D orbital** (Three.js
 vendorizado, 100% offline) com física de partículas, teia de aranha luminosa,
 **fita RGB animada** nos links selecionados, card HUD Sci-Fi por nó e botão de
 tela cheia.
@@ -48,7 +48,8 @@ no navegador padrão. Pressione `ESC` para sair do fullscreen.
 
 ## Como funciona
 
-1. `astos/parser.py` — varre `**/*.py`, parseia `ast.Import` / `ast.ImportFrom`,
+1. `astos/parser.py` — varre `**/*.{py,c,h,cpp,hpp,cc,cxx}`, parseia `ast.Import` /
+   `ast.ImportFrom` (Python) e `#include "..."` / `<...>` (C/C++, via regex),
    resolve dependências locais e calcula o grau de cada módulo.
 2. `astos/generator.py` — injeta o grafo + `three.min.js` + `OrbitControls.js`
    (vendorizados em `astos/vendor/`) em um HTML único, sem nenhum fetch externo.
