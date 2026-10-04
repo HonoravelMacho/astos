@@ -10,6 +10,8 @@ import html
 import json
 from pathlib import Path
 
+from .parser import SUPPORTED_LABEL
+
 VENDOR_DIR = Path(__file__).parent / "vendor"
 
 
@@ -27,6 +29,7 @@ def render_html(graph: dict) -> str:
     nodes_json = json.dumps(graph.get("nodes", []), ensure_ascii=False)
     links_json = json.dumps(graph.get("links", []), ensure_ascii=False)
     mods_json = json.dumps(graph.get("mods", {}), ensure_ascii=False)
+    exts_html = html.escape(SUPPORTED_LABEL)
     meta = graph.get("meta", {})
     n_count = len(graph.get("nodes", []))
     e_count = len(graph.get("links", []))
@@ -219,7 +222,7 @@ const $ = (id) => document.getElementById(id);
 
 /* ================= estado ================= */
 if (!NODES.length) {{
-  $('empty-msg').innerHTML = 'Nenhum arquivo <b style="color:var(--txt)">.py · .c · .h · .cpp · .hpp · .cc · .cxx</b> ' +
+  $('empty-msg').innerHTML = 'Nenhum arquivo <b style="color:var(--txt)">{exts_html}</b> ' +
     'foi encontrado neste repositório.<br>Rode <b style="color:var(--cyan)">astos</b> dentro da pasta do código-fonte.';
   $('empty').classList.add('show');
   $('st-nodes').textContent = '0'; $('st-edges').textContent = '0';

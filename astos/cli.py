@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 
 from .generator import generate
-from .parser import scan_repository
+from .parser import SUPPORTED_LABEL, scan_repository
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
@@ -50,7 +50,7 @@ def main(full: bool, no_open: bool, root: str) -> None:
     n, e = len(graph["nodes"]), len(graph["links"])
     if n == 0:
         click.echo(
-            "ASTOS :: AVISO: nenhum arquivo suportado (.py, .c, .h, .cpp, .hpp, .cc, .cxx) "
+            f"ASTOS :: AVISO: nenhum arquivo suportado ({SUPPORTED_LABEL}) "
             f"encontrado em {repo} — o grafo foi gerado vazio."
         )
     else:
