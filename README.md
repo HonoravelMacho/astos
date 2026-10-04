@@ -81,6 +81,26 @@ Limites honestos: fora Python o parsing é heurístico (regex, sem dependências
 call edges existem só para Python; o mapa é estático (rode `astos -a` se
 desconfiar que envelheceu).
 
+## ASTOS × Graphify — comparação honesta
+
+O **ASTOS não é melhor que o Graphify**. São ferramentas diferentes, e esta
+seção existe para ninguém comprar gato por lebre:
+
+- **Graphify** é a ferramenta mais forte: grafo semântico profundo (extração via
+  LLM, comunidades, god nodes, queries com teto de tokens, grafo persistente
+  entre sessões). Em mãos treinadas, economiza mais — principalmente em
+  perguntas repetidas e fundas sobre a mesma base.
+- **ASTOS** é a ferramenta mais simples: mapa estrutural (quem depende de quem,
+  hubs, símbolos, chamadas), gerado em segundos, com zero dependências, zero
+  tokens para construir e zero conceitos para aprender. Ele entrega **mais de
+  50% do benefício de orientação com 1% do esforço — sem o usuário precisar
+  entender nada**.
+
+Regra prática: use o ASTOS sempre (custo zero, benefício imediato); some o
+Graphify quando as perguntas ficarem semânticas e recorrentes. O bloco que o
+`astos` instala no `AGENTS.md` já orquestra os dois: mapa ASTOS para estrutura,
+`graphify-out/` para significado.
+
 ## Como funciona
 
 1. `astos/parser.py` — varre `**/*.{py,c,h,cpp,dart,rs,js,jsx,ts,tsx,java,go,cs,kt,...}`
