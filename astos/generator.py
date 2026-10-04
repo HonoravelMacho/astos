@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .parser import SUPPORTED_LABEL
@@ -684,4 +685,91 @@ def generate(output_path: str | Path, graph: dict) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_html(graph), encoding="utf-8")
+    return output_path
+
+
+def _short_defs(defs: list[dict], cap: int = 12) -> str:
+    parts = []
+    for d in defs[:cap]:
+        name = d.get("n", "?")
+        kind = d.get("k", "")
+        line = d.get("l", 0)
+        parts.append(f"{name}{'()' if kind == 'func' else ''}:L{line}")
+    s = ", ".join(parts)
+    if len(defs) > cap:
+        s += f" (+{len(defs) - cap})"
+    return s
+
+
+def render_map_md(graph: dict) -> str:
+    """Resumo compacto do repositório, desenhado para consumo por agentes de IA.
+
+    Uma linha por arquivo (caminho, linguagem, grau, dependências, símbolos
+    com linha e chamadas resolvidas) + ranking de hubs + fluxo de chamadas.
+    """
+    meta = graph.get("meta", {})
+    nodes = graph.get("nodes", [])
+    links = graph.get("links", [])
+    calls = graph.get("call_edges", [])
+    root = Path(str(meta.get("root", "."))).name or "repo"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    langs = ", ".join(meta.get("langs", [])) or "—"
+
+    adj: dict[str, list[str]] = {}
+    for s, t in links:
+        adj.setdefault(s, []).append(t)
+    by_id = {n["id"]: n for n in nodes}
+    calls_by_src: dict[str, list[tuple[str, str]]] = {}
+    for edge in calls:
+        if len(edge) >= 3:
+            calls_by_src.setdefault(edge[0], []).append((edge[2], edge[1]))
+
+    L = [f"# ASTOS MAP — {root}",
+         f"> Gerado por `astos` em {now}. {len(nodes)} arquivos · "
+         f"{len(links)} dependências · {len(calls)} chamadas inter-arquivo · langs: {langs}.",
+         "> Se desatualizado: `astos -a`. Detalhe: `.astos/graph.json`. Visual humano: `.astos/index.html`.",
+         "",
+         "## HUBS (maior degree centrality)"]
+    for n in nodes[:15]:
+        deps = adj.get(n["id"], [])
+        dep_s = ", ".join(f"`{by_id[d]['file']}`" for d in deps[:8] if d in by_id)
+        extra = f" — dep: {dep_s}" if dep_s else ""
+        if len(deps) > 8:
+            extra += f" (+{len(deps) - 8})"
+        L.append(f"- `{n['file']}` [{n.get('lang', '?')}] deg={n.get('deg', 0)}{extra}")
+    L.append("")
+    L.append("## ARQUIVOS")
+    for n in nodes:
+        segs = [f"`{n['file']}` [{n.get('lang', '?')}] deg={n.get('deg', 0)}"]
+        deps = [by_id[d]["file"] for d in adj.get(n["id"], []) if d in by_id]
+        if deps:
+            shown = ", ".join(f"`{d}`" for d in deps[:10])
+            if len(deps) > 10:
+                shown += f" (+{len(deps) - 10})"
+            segs.append(f"dep: {shown}")
+        exts = list(n.get("externals", []))[:6]
+        if exts:
+            segs.append("ext: " + ", ".join(f"`{e}`" for e in exts))
+        if n.get("defs"):
+            segs.append("def: " + _short_defs(n["defs"]))
+        src_calls = calls_by_src.get(n["id"], [])[:8]
+        if src_calls:
+            segs.append("calls: " + ", ".join(
+                f"{c}()>`{by_id[t]['file']}`" if t in by_id else f"{c}()"
+                for c, t in src_calls))
+        L.append("- " + " :: ".join(segs))
+    if calls:
+        L += ["", "## FLUXO (chamadas Python entre arquivos, top 30)"]
+        for s, t, name in calls[:30]:
+            sf = by_id.get(s, {}).get("file", s)
+            tf = by_id.get(t, {}).get("file", t)
+            L.append(f"- `{sf}` --{name}()--> `{tf}`")
+    L.append("")
+    return "\n".join(L)
+
+
+def generate_map(output_path: str | Path, graph: dict) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_map_md(graph), encoding="utf-8")
     return output_path

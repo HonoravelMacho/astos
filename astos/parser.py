@@ -63,26 +63,26 @@ C_KEYWORDS = {
 }
 
 RE_DART_IO = re.compile(r'''(?:import|export)\s+['"]([^'"]+)['"]|part\s+['"]([^'"]+)['"]''')
-RE_DART_SYM = re.compile(r'^\s*(?:abstract\s+|sealed\s+|base\s+|final\s+)?(?:class|mixin|enum|extension(?:\s+type)?)\s+\w+', re.MULTILINE)
+RE_DART_SYM = re.compile(r'^\s*(?:abstract\s+|sealed\s+|base\s+|final\s+)?(?:class|mixin|enum)\s+(\w+)|^\s*(?:[\w<>?,\s]+\s+)?(\w+)\s*\([^;{}=]*\)\s*(?:=>|\{)\s*$', re.MULTILINE)
 
 RE_RUST_MOD = re.compile(r'^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;', re.MULTILINE)
 RE_RUST_USE = re.compile(r'^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([^;]+);', re.MULTILINE)
-RE_RUST_SYM = re.compile(r'^\s*(?:pub(?:\([^)]*\))?\s+)?(?:fn|struct|enum|trait|impl)\s+(?:<[^>]*>\s*)?(\w+)', re.MULTILINE)
+RE_RUST_SYM = re.compile(r'^\s*(?:pub(?:\([^)]*\))?\s+)?(?P<kind>fn|struct|enum|trait|impl)\s+(?P<name>\w+)', re.MULTILINE)
 RE_CARGO_NAME = re.compile(r'^\s*name\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 
 RE_JS_IMP = re.compile(r'''(?:import\s+(?:[^'"]*?\s+from\s+)?|export\s+[^'"]*?\s+from\s+|require\s*\(|import\s*\()\s*['"]([^'"]+)['"]''')
-RE_JS_SYM = re.compile(r'^\s*(?:export\s+)?(?:async\s+)?(?:function\s+\w+|class\s+\w+)', re.MULTILINE)
+RE_JS_SYM = re.compile(r'^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+(\w+)|^\s*(?:export\s+(?:default\s+)?)?class\s+(\w+)', re.MULTILINE)
 
 RE_JAVA_IMP = re.compile(r'^\s*import\s+(?:static\s+)?([\w.]+)(?:\.\*)?\s*;', re.MULTILINE)
-RE_JAVA_SYM = re.compile(r'^\s*(?:public\s+|protected\s+|private\s+|abstract\s+|final\s+|sealed\s+)*(?:class|interface|enum)\s+(\w+)', re.MULTILINE)
+RE_JAVA_SYM = re.compile(r'^\s*(?:public\s+|protected\s+|private\s+|abstract\s+|final\s+|sealed\s+)*(?P<kind>class|interface|enum)\s+(?P<name>\w+)', re.MULTILINE)
 
 RE_GO_IMP = re.compile(r'"([^"]+)"')
-RE_GO_FUNC = re.compile(r'^\s*func\s+(?:\([^)]*\)\s*)?(\w+)', re.MULTILINE)
+RE_GO_FUNC = re.compile(r'^\s*func\s+(?:\([^)]*\)\s*)?(?P<name>\w+)', re.MULTILINE)
 RE_GO_MOD = re.compile(r'^\s*module\s+(\S+)', re.MULTILINE)
 RE_GO_PKG = re.compile(r'^\s*package\s+(\w+)', re.MULTILINE)
 
 RE_CS_USING = re.compile(r'^\s*using\s+(?:static\s+|global\s+)?([\w.]+)\s*;', re.MULTILINE)
-RE_CS_SYM = re.compile(r'^\s*(?:public\s+|internal\s+|private\s+|protected\s+|abstract\s+|sealed\s+|static\s+|partial\s+)*(?:class|interface|enum|struct)\s+(\w+)', re.MULTILINE)
+RE_CS_SYM = re.compile(r'^\s*(?:namespace\s+[\w.]+\s*\{\s*)?(?:public\s+|internal\s+|private\s+|protected\s+|abstract\s+|sealed\s+|static\s+|partial\s+)*(?P<kind>class|interface|enum|struct)\s+(?P<name>\w+)', re.MULTILINE)
 
 RE_KT_IMP = re.compile(r'^\s*import\s+([\w.]+)(?:\.\*)?\s*$', re.MULTILINE)
 RE_KT_SYM = re.compile(r'^\s*(?:public\s+|private\s+|internal\s+|open\s+|abstract\s+|data\s+|sealed\s+)*(?:class|interface|object|enum)\s+(\w+)|^\s*(?:public\s+|private\s+|internal\s+|suspend\s+)?fun\s+(?:<[^>]*>\s*)?(\w+)', re.MULTILINE)
@@ -133,29 +133,28 @@ def _extract_imports(tree: ast.AST) -> list[str]:
     return uniq
 
 
-def _parse_c_source(src: str) -> tuple[list[str], list[str], int]:
-    """Retorna (includes locais crus, imports externos p/ HUD, nº de funções)."""
-    code = RE_C_COMMENTS.sub(" ", src)
-    local, external = [], []
+def _parse_c_source(src: str) -> tuple[list[str], list[str], list[dict]]:
+    """Retorna (includes locais, imports externos, defs [{n,k,l}])."""
+    code = _strip_c_keep_lines(src)
+    local, external, defs = [], [], []
     for delim, target in RE_C_INCLUDE.findall(code):
         target = target.strip()
         if delim == '"':
             local.append(target)
         else:
             external.append(f"<{target}>")
-    funcs = 0
     for m in RE_C_FUNC.finditer(code):
         name = m.group(1)
         if name not in C_KEYWORDS:
             before = code[max(0, m.start(1) - 60):m.start(1)].split()
             if before and re.match(r'^[A-Za-z_][\w\*]*$', before[-1]) and before[-1] not in C_KEYWORDS:
-                funcs += 1
+                defs.append({"n": name, "k": "func", "l": _line_of(code, m.start())})
             elif not before:
-                funcs += 1
-    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), funcs
+                defs.append({"n": name, "k": "func", "l": _line_of(code, m.start())})
+    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), defs
 
 
-def _parse_dart_source(src: str) -> tuple[list[str], list[str], int]:
+def _parse_dart_source(src: str) -> tuple[list[str], list[str], list[dict]]:
     local, external = [], []
     for uri, part in RE_DART_IO.findall(src):
         target = (uri or part).strip()
@@ -165,18 +164,24 @@ def _parse_dart_source(src: str) -> tuple[list[str], list[str], int]:
             external.append(target)
         else:
             local.append(target)
-    syms = len(RE_DART_SYM.findall(src))
-    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), syms
+    defs = []
+    for m in RE_DART_SYM.finditer(src):
+        cls, fn = m.group(1), m.group(2)
+        if cls:
+            defs.append({"n": cls, "k": "class", "l": _line_of(src, m.start())})
+        elif fn and fn not in DART_CTRL:
+            defs.append({"n": fn, "k": "func", "l": _line_of(src, m.start())})
+    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), defs
 
 
-def _parse_rust_source(src: str) -> tuple[list[str], list[str], int]:
+def _parse_rust_source(src: str) -> tuple[list[str], list[str], list[dict]]:
     mods = [f"mod:{m}" for m in RE_RUST_MOD.findall(src)]
     uses = []
     for stmt in RE_RUST_USE.findall(src):
         for chunk in stmt.split(","):
             uses.append("use:" + chunk.strip().split(" as ")[0].strip().strip("{} "))
-    syms = len(RE_RUST_SYM.findall(src))
-    return list(dict.fromkeys(mods + uses)), [], syms
+    defs = _named(src, RE_RUST_SYM)
+    return list(dict.fromkeys(mods + uses)), [], defs
 
 
 def _parse_js_source(src: str) -> tuple[list[str], list[str], int]:
@@ -189,18 +194,17 @@ def _parse_js_source(src: str) -> tuple[list[str], list[str], int]:
             local.append(spec)
         else:
             external.append(spec)
-    syms = len(RE_JS_SYM.findall(src))
-    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), syms
+    defs = _named(src, RE_JS_SYM, kinds={1: "func", 2: "class"})
+    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), defs
 
 
-def _parse_java_source(src: str) -> tuple[list[str], list[str], int]:
+def _parse_java_source(src: str) -> tuple[list[str], list[str], list[dict]]:
     imports = [i for i in RE_JAVA_IMP.findall(src) if not i.startswith(("java.", "javax."))]
     external = [i for i in RE_JAVA_IMP.findall(src) if i.startswith(("java.", "javax."))]
-    syms = len(RE_JAVA_SYM.findall(src))
-    return list(dict.fromkeys(imports)), list(dict.fromkeys(external)), syms
+    return list(dict.fromkeys(imports)), list(dict.fromkeys(external)), _named(src, RE_JAVA_SYM)
 
 
-def _parse_go_source(src: str) -> tuple[list[str], list[str], int]:
+def _parse_go_source(src: str) -> tuple[list[str], list[str], list[dict], str]:
     quoted = RE_GO_IMP.findall(src)
     local, external = [], []
     for q in quoted:
@@ -211,24 +215,95 @@ def _parse_go_source(src: str) -> tuple[list[str], list[str], int]:
             external.append(q)
     m = RE_GO_PKG.search(src)
     pkg = m.group(1) if m else ""
-    syms = len(RE_GO_FUNC.findall(src))
-    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), syms, pkg
+    defs = _named(src, RE_GO_FUNC, kinds={1: "func"})
+    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), defs, pkg
 
 
-def _parse_cs_source(src: str) -> tuple[list[str], list[str], int]:
+def _parse_cs_source(src: str) -> tuple[list[str], list[str], list[dict]]:
     usings = RE_CS_USING.findall(src)
     local = [u for u in usings if not u.startswith("System")]
     external = [u for u in usings if u.startswith("System")]
-    syms = len(RE_CS_SYM.findall(src))
-    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), syms
+    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), _named(src, RE_CS_SYM)
 
 
-def _parse_kt_source(src: str) -> tuple[list[str], list[str], int]:
+def _parse_kt_source(src: str) -> tuple[list[str], list[str], list[dict]]:
     imports = RE_KT_IMP.findall(src)
     local = [i for i in imports if not i.startswith(("kotlin.", "java.", "javax."))]
     external = [i for i in imports if i.startswith(("kotlin.", "java.", "javax."))]
-    syms = len(RE_KT_SYM.findall(src))
-    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), syms
+    defs = _named(src, RE_KT_SYM, kinds={1: "class", 2: "func"})
+    return list(dict.fromkeys(local)), list(dict.fromkeys(external)), defs
+
+
+def _line_of(src: str, pos: int) -> int:
+    return src.count("\n", 0, pos) + 1
+
+
+def _named(src: str, pattern: re.Pattern, kinds: dict[int, str] | None = None,
+           skip: set[str] | None = None, cap: int = 150) -> list[dict]:
+    """Extrai [{n, k, l}] (nome, kind, linha) de matches com grupos name/kind."""
+    out: list[dict] = []
+    for m in pattern.finditer(src):
+        gd = m.groupdict()
+        name = gd.get("name") or ""
+        kind = (gd.get("kind") or "").lower() if kinds is None else kinds.get(0, "")
+        if kinds is not None:
+            # padrão multi-grupo sem nomes: usa kinds por índice do grupo
+            for idx, k in kinds.items():
+                try:
+                    if m.group(idx):
+                        name, kind = m.group(idx), k
+                        break
+                except IndexError:
+                    pass
+        if not name or (skip and name in skip):
+            continue
+        out.append({"n": name, "k": kind or "def", "l": _line_of(src, m.start())})
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _strip_c_keep_lines(src: str) -> str:
+    return RE_C_COMMENTS.sub(lambda m: "\n" * m.group(0).count("\n"), src)
+
+
+DART_CTRL = {
+    "if", "for", "while", "do", "switch", "catch", "assert", "return",
+    "else", "case", "new", "const", "final", "var", "late", "await",
+    "yield", "throw", "import", "export", "library", "part", "try", "on",
+}
+
+
+class _PyVisitor(ast.NodeVisitor):
+    """Coleta defs (com linha e aninhamento) e nomes chamados (Python)."""
+
+    def __init__(self) -> None:
+        self.defs: list[dict] = []
+        self.calls: list[str] = []
+        self._stack: list[str] = []
+
+    def _visit_def(self, node: ast.AST, kind: str, name: str):
+        qual = ".".join(self._stack + [name])
+        self.defs.append({"n": qual, "k": kind,
+                          "l": getattr(node, "lineno", 0),
+                          "top": not self._stack})
+        self._stack.append(name)
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        self._visit_def(node, "func", node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        self._visit_def(node, "func", node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        self._visit_def(node, "class", node.name)
+
+    def visit_Call(self, node: ast.Call):
+        if isinstance(node.func, ast.Name):
+            self.calls.append(node.func.id)
+        self.generic_visit(node)
 
 
 def _resolve_local(raw: str, module_index: dict[str, str]) -> str | None:
@@ -415,42 +490,51 @@ def scan_repository(root: str | Path) -> dict:
         except OSError:
             src = ""
         rec: dict = {"id": base, "rel": rel, "lang": lang,
-                     "imports_raw": [], "externals": [], "symbols": 0}
+                     "imports_raw": [], "externals": [], "defs": [],
+                     "calls": [], "tops": set()}
         if lang == "python":
             try:
                 tree = ast.parse(src)
                 rec["imports_raw"] = _extract_imports(tree)
-                rec["symbols"] = sum(
-                    isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                    for n in tree.body
-                )
+                vis = _PyVisitor()
+                vis.visit(tree)
+                rec["defs"] = vis.defs[:150]
+                rec["calls"] = list(dict.fromkeys(vis.calls))[:200]
+                rec["tops"] = {d["n"].split(".")[0] for d in vis.defs if d.get("top")}
             except (SyntaxError, ValueError):
                 pass
         elif lang == "c":
-            local, ext, funcs = _parse_c_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=funcs)
+            local, ext, defs = _parse_c_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         elif lang == "dart":
-            local, ext, syms = _parse_dart_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms)
+            local, ext, defs = _parse_dart_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         elif lang == "rust":
-            local, ext, syms = _parse_rust_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms)
+            local, ext, defs = _parse_rust_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         elif lang == "js":
-            local, ext, syms = _parse_js_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms)
+            local, ext, defs = _parse_js_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         elif lang == "java":
-            local, ext, syms = _parse_java_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms)
+            local, ext, defs = _parse_java_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         elif lang == "go":
-            local, ext, syms, pkg = _parse_go_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms, pkg=pkg)
+            local, ext, defs, pkg = _parse_go_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150], pkg=pkg)
         elif lang == "csharp":
-            local, ext, syms = _parse_cs_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms)
+            local, ext, defs = _parse_cs_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         elif lang == "kotlin":
-            local, ext, syms = _parse_kt_source(src)
-            rec.update(imports_raw=local, externals=ext, symbols=syms)
+            local, ext, defs = _parse_kt_source(src)
+            rec.update(imports_raw=local, externals=ext, defs=defs[:150])
         records.append(rec)
+
+    # índice global de definições Python top-level: nome -> arquivos (p/ call edges)
+    def_index: dict[str, set[str]] = {}
+    for r in records:
+        if r.get("lang") == "python":
+            for t in r.get("tops", set()):
+                def_index.setdefault(t, set()).add(r["id"])
 
     groups = sorted({r["rel"].split("/")[0] if "/" in r["rel"] else "root" for r in records})
     color_of = {g: PALETTE[i % len(PALETTE)] for i, g in enumerate(groups)}
@@ -479,7 +563,9 @@ def scan_repository(root: str | Path) -> dict:
             "mod": mod,
             "color": color_of.get(mod, "#22d3ee"),
             "imports": shown,
-            "symbols": r["symbols"],
+            "externals": list(r.get("externals", []))[:30],
+            "symbols": len(r.get("defs", [])),
+            "defs": r.get("defs", []),
             "deg": 0,
         }
         nodes.append(node)
@@ -511,6 +597,26 @@ def scan_repository(root: str | Path) -> dict:
                 for dst in _resolve_go(raw, r["rel"], by_rel, dir_files, go_mod):
                     add_edge(src_id, dst)
 
+    # call edges (Python): chamador -> arquivo que define o nome chamado.
+    # Regra conservadora: ignora chamadas a nomes locais e nomes ambíguos
+    # (definidos em 2+ arquivos) para não inventar aresta.
+    call_edges: list[list[str]] = []
+    seen_calls = set()
+    for r in records:
+        if r.get("lang") != "python":
+            continue
+        own = r.get("tops", set()) | {r["id"].split(".")[-1]}
+        for name in r.get("calls", []):
+            if name in own:
+                continue
+            definers = (def_index.get(name, set()) - {r["id"]}) or set()
+            if len(definers) == 1:
+                dst = next(iter(definers))
+                key = (r["id"], dst, name)
+                if key not in seen_calls:
+                    seen_calls.add(key)
+                    call_edges.append([r["id"], dst, name])
+
     deg: dict[str, int] = {n["id"]: 0 for n in nodes}
     for s, t in links:
         deg[s] = deg.get(s, 0) + 1
@@ -524,11 +630,13 @@ def scan_repository(root: str | Path) -> dict:
     return {
         "nodes": nodes,
         "links": links,
+        "call_edges": call_edges,
         "mods": color_of,
         "meta": {
             "root": str(root),
             "files": len(files),
             "edges": len(links),
+            "call_edges": len(call_edges),
             "langs": sorted({r.get("lang", "python") for r in records}),
             "supported": SUPPORTED_LABEL,
         },
