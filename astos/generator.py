@@ -159,6 +159,7 @@ html, body {{ margin: 0; height: 100%; background: var(--bg); color: var(--txt);
   <span class="sub">3D IMERSIVO · {n_count} NÓS · {e_count} ARESTAS · 100% OFFLINE</span>
   <button class="hbtn on" id="btn-rgb" title="Fita RGB animada percorrendo as arestas">[ FLUXO RGB ]</button>
   <button class="hbtn on" id="btn-orbit" title="Rotação orbital contínua">[ ÓRBITA ]</button>
+  <button class="hbtn" id="btn-freeze" title="Congela tudo: física + órbita (atalho: espaço)">[ ❄ CONGELAR ]</button>
   <button class="hbtn" id="btn-full" title="Tela cheia (ESC para sair)">[ ⛶ FULLSCREEN ]</button>
   <div id="stats">nós <b id="st-nodes">—</b> · arestas <b id="st-edges">—</b><br><span id="st-sel">nenhum nó selecionado</span></div>
 </div>
@@ -203,7 +204,7 @@ html, body {{ margin: 0; height: 100%; background: var(--bg); color: var(--txt);
 <div id="legend"></div>
 <div id="empty"><div class="card"><div class="big2">⚠ NENHUM CÓDIGO SUPORTADO ENCONTRADO</div><div class="small2" id="empty-msg"></div></div></div>
 <div id="info"><span class="x" id="info-x">[x]</span><div class="t" id="info-t"></div><div class="r" id="info-r"></div></div>
-<div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · clique num nó: HUD · ESC: sair do fullscreen</div>
+<div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · clique num nó: HUD · espaço: congelar · ESC: sair do fullscreen</div>
 
 <div id="boot">
   <div class="big">ASTOS</div>
@@ -229,7 +230,7 @@ if (!NODES.length) {{
 }}
 const state = {{
   phys: true, rotY: true, rotX: false, orbSpeed: 1.0, repulsion: 1.0,
-  rgbGlobal: true, rgbSelect: true, flux: 1.0,
+  rgbGlobal: true, rgbSelect: true, flux: 1.0, frozen: false,
   minDeg: 0, hiddenMods: new Set(), selected: null,
 }};
 const byId = {{}}; NODES.forEach(n => byId[n.id] = n);
@@ -386,7 +387,7 @@ function edgeAllowed(e) {{
 }}
 let hueT = 0;
 function tickPhotons() {{
-  hueT = (hueT + 0.0035 * state.flux) % 1;
+  if (!state.frozen) hueT = (hueT + 0.0035 * state.flux) % 1;
   let w = 0;
   const target = Math.floor(MAXP * Math.min(1, 0.35 + state.flux / 2.2));
   for (let i = 0; i < runners.length && w < target; i++) {{
@@ -395,8 +396,10 @@ function tickPhotons() {{
     let guard = 0;
     while (e && !edgeAllowed(e) && guard++ < 6) {{ r.e = (Math.random() * E.length) | 0; e = E[r.e]; }}
     if (!e || !edgeAllowed(e)) continue;
-    r.t += r.sp * state.flux;
-    if (r.t > 1) {{ r.t = 0; r.e = (Math.random() * E.length) | 0; continue; }}
+    if (!state.frozen) {{
+      r.t += r.sp * state.flux;
+      if (r.t > 1) {{ r.t = 0; r.e = (Math.random() * E.length) | 0; continue; }}
+    }}
     const a = P[e.s], b = P[e.t];
     _pa.set(a.x, a.y, a.z); _pb.set(b.x, b.y, b.z);
     const sel = (e.s === state.selected || e.t === state.selected);
@@ -469,6 +472,7 @@ function physics() {{
     p.vx *= 0.86; p.vy *= 0.86; p.vz *= 0.86;
     const sp = Math.hypot(p.vx,p.vy,p.vz);
     if (sp > 6) {{ p.vx *= 6/sp; p.vy *= 6/sp; p.vz *= 6/sp; }}
+    else if (sp < 0.06) {{ p.vx = p.vy = p.vz = 0; }} // sleep: para de tremer ao estabilizar
     p.x += p.vx; p.y += p.vy; p.z += p.vz;
   }}
 }}
@@ -561,14 +565,14 @@ function rebuildVisibility() {{
 }}
 
 /* ================= controles ================= */
-$('btn-phys').onclick = (e) => {{ state.phys = !state.phys; e.target.textContent = state.phys ? 'FÍSICA ON' : 'FÍSICA OFF'; e.target.classList.toggle('on', state.phys); }};
+$('btn-phys').onclick = (e) => {{ if (state.frozen) doUnfreeze(); state.phys = !state.phys; e.target.textContent = state.phys ? 'FÍSICA ON' : 'FÍSICA OFF'; e.target.classList.toggle('on', state.phys); }};
 $('btn-cam').onclick = () => {{
   controls.target.set(0,0,0); camera.position.set(0, 120, 320);
 }};
 $('orb').oninput = (e) => {{ state.orbSpeed = +e.target.value / 10; $('orb-val').textContent = state.orbSpeed.toFixed(1); }};
 $('rep').oninput = (e) => {{ state.repulsion = +e.target.value / 10; $('rep-val').textContent = state.repulsion.toFixed(1); }};
-$('btn-roty').onclick = (e) => {{ state.rotY = !state.rotY; e.target.classList.toggle('on', state.rotY); }};
-$('btn-rotx').onclick = (e) => {{ state.rotX = !state.rotX; e.target.classList.toggle('on', state.rotX); }};
+$('btn-roty').onclick = (e) => {{ if (state.frozen) doUnfreeze(); state.rotY = !state.rotY; e.target.classList.toggle('on', state.rotY); }};
+$('btn-rotx').onclick = (e) => {{ if (state.frozen) doUnfreeze(); state.rotX = !state.rotX; e.target.classList.toggle('on', state.rotX); }};
 $('flux').oninput = (e) => {{ state.flux = +e.target.value / 12; $('flux-val').textContent = state.flux.toFixed(1); }};
 function syncRgbBtns() {{
   $('btn-rgb').classList.toggle('on', state.rgbGlobal);
@@ -579,7 +583,36 @@ function syncRgbBtns() {{
 $('btn-rgb').onclick = () => {{ state.rgbGlobal = !state.rgbGlobal; syncRgbBtns(); }};
 $('btn-rgb2').onclick = (e) => {{ state.rgbGlobal = !state.rgbGlobal; syncRgbBtns(); }};
 $('btn-selrgb').onclick = () => {{ state.rgbSelect = !state.rgbSelect; syncRgbBtns(); }};
-$('btn-orbit').onclick = (e) => {{ controls.autoRotate = !controls.autoRotate; e.target.classList.toggle('on', controls.autoRotate); }};
+$('btn-orbit').onclick = (e) => {{ if (state.frozen) doUnfreeze(); controls.autoRotate = !controls.autoRotate; e.target.classList.toggle('on', controls.autoRotate); }};
+/* ---- CONGELAR: para física + órbita + fluxo de uma vez ---- */
+let _saved = null;
+function syncMotionUI() {{
+  $('btn-phys').textContent = state.phys ? 'FÍSICA ON' : 'FÍSICA OFF';
+  $('btn-phys').classList.toggle('on', state.phys);
+  $('btn-roty').classList.toggle('on', state.rotY);
+  $('btn-rotx').classList.toggle('on', state.rotX);
+  $('btn-orbit').classList.toggle('on', controls.autoRotate);
+}}
+function doFreeze() {{
+  if (state.frozen) return;
+  _saved = {{ phys: state.phys, rotY: state.rotY, rotX: state.rotX, auto: controls.autoRotate }};
+  state.frozen = true;
+  state.phys = false; state.rotY = false; state.rotX = false; controls.autoRotate = false;
+  for (const id in P) {{ P[id].vx = P[id].vy = P[id].vz = 0; }}
+  $('btn-freeze').textContent = '[ ▶ DESCONGELAR ]';
+  $('btn-freeze').classList.add('on');
+  syncMotionUI();
+}}
+function doUnfreeze() {{
+  if (!state.frozen) return;
+  state.frozen = false;
+  state.phys = _saved.phys; state.rotY = _saved.rotY; state.rotX = _saved.rotX;
+  controls.autoRotate = _saved.auto;
+  $('btn-freeze').textContent = '[ ❄ CONGELAR ]';
+  $('btn-freeze').classList.remove('on');
+  syncMotionUI();
+}}
+$('btn-freeze').onclick = () => {{ state.frozen ? doUnfreeze() : doFreeze(); }};
 $('btn-full').onclick = () => {{
   if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {{}});
   else document.exitFullscreen().catch(() => {{}});
@@ -611,6 +644,7 @@ addEventListener('resize', () => {{
 document.addEventListener('keydown', (e) => {{
   if (e.key === 'Escape' && state.selected) clearSelect();
   if (e.key === 'f' && document.activeElement.tagName !== 'INPUT') $('btn-full').click();
+  if (e.key === ' ' && document.activeElement.tagName !== 'INPUT') {{ e.preventDefault(); $('btn-freeze').click(); }}
 }});
 
 /* ================= loop ================= */
