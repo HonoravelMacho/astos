@@ -44,6 +44,8 @@ astos --no-agents
 Isso gera `.astos/index.html` (arquivo único, offline), `.astos/map.md` e
 `.astos/graph.json`, e abre a interface no navegador padrão. Pressione `ESPAÇO`
 para congelar/descongelar o movimento, `ESC` para sair do fullscreen.
+Navegação por teclado: `WASD`/setas movem a câmera sem rotacionar
+(`Shift` = 3x mais rápido), `Q`/`E` aproximam/afastam.
 
 ## O que você vê (3D)
 

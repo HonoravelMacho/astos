@@ -205,7 +205,7 @@ html, body {{ margin: 0; height: 100%; background: var(--bg); color: var(--txt);
 <div id="legend"></div>
 <div id="empty"><div class="card"><div class="big2">⚠ NENHUM CÓDIGO SUPORTADO ENCONTRADO</div><div class="small2" id="empty-msg"></div></div></div>
 <div id="info"><span class="x" id="info-x">[x]</span><div class="t" id="info-t"></div><div class="r" id="info-r"></div></div>
-<div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · clique num nó: HUD · espaço: congelar · ESC: sair do fullscreen</div>
+<div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · WASD/setas: mover · Q/E: aprox./afastar · clique num nó: HUD · espaço: congelar · ESC: sair do fullscreen</div>
 
 <div id="boot">
   <div class="big">ASTOS</div>
@@ -642,11 +642,41 @@ addEventListener('resize', () => {{
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 }});
+/* pan pelo teclado: move câmera + alvo no plano da tela, sem rotacionar */
+const keysDown = new Set();
 document.addEventListener('keydown', (e) => {{
+  const tag = document.activeElement ? document.activeElement.tagName : '';
+  const k = e.key.toLowerCase();
+  if ((tag === 'INPUT' || tag === 'TEXTAREA')) return;
+  if (['w','a','s','d','q','e','arrowup','arrowdown','arrowleft','arrowright','shift'].includes(k)) {{
+    keysDown.add(k); e.preventDefault();
+  }}
   if (e.key === 'Escape' && state.selected) clearSelect();
-  if (e.key === 'f' && document.activeElement.tagName !== 'INPUT') $('btn-full').click();
-  if (e.key === ' ' && document.activeElement.tagName !== 'INPUT') {{ e.preventDefault(); $('btn-freeze').click(); }}
+  if (k === 'f') $('btn-full').click();
+  if (e.key === ' ') {{ e.preventDefault(); $('btn-freeze').click(); }}
 }});
+document.addEventListener('keyup', (e) => keysDown.delete(e.key.toLowerCase()));
+window.addEventListener('blur', () => keysDown.clear());
+
+const _fwd = new THREE.Vector3(), _rgt = new THREE.Vector3(), _up = new THREE.Vector3(), _mv = new THREE.Vector3();
+function keyboardPan() {{
+  if (!keysDown.size) return;
+  camera.getWorldDirection(_fwd);
+  _rgt.crossVectors(_fwd, camera.up).normalize();
+  _up.crossVectors(_rgt, _fwd).normalize();
+  const dist = camera.position.distanceTo(controls.target);
+  const step = dist * 0.07 * (keysDown.has('shift') ? 3 : 1);
+  _mv.set(0, 0, 0);
+  if (keysDown.has('w') || keysDown.has('arrowup')) _mv.add(_up);
+  if (keysDown.has('s') || keysDown.has('arrowdown')) _mv.sub(_up);
+  if (keysDown.has('a') || keysDown.has('arrowleft')) _mv.sub(_rgt);
+  if (keysDown.has('d') || keysDown.has('arrowright')) _mv.add(_rgt);
+  if (keysDown.has('q')) _mv.add(_fwd);
+  if (keysDown.has('e')) _mv.sub(_fwd);
+  if (_mv.lengthSq() === 0) return;
+  _mv.normalize().multiplyScalar(step);
+  camera.position.add(_mv); controls.target.add(_mv);
+}}
 
 /* ================= loop ================= */
 paintEdges();
@@ -657,6 +687,7 @@ function loop() {{
   physics();
   syncMeshes();
   tickPhotons();
+  keyboardPan();
   if (state.rotY) controls.autoRotateSpeed = state.orbSpeed * 2.0;
   else if (!controls.autoRotate) {{}}
   if (!state.rotY && $('btn-orbit').classList.contains('on')) {{ /* mantém autoRotate do toggle */ }}
