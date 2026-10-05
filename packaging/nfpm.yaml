@@ -1,0 +1,13 @@
+# nFPM: gera .deb e .rpm do binário onefile (ver .github/workflows/release.yml).
+# Versão vem do ambiente (tag): ASTOS_VERSION=1.2.3 (sem "v").
+name: astos
+arch: amd64
+version: ${ASTOS_VERSION:-0.0.0}
+release: 1
+maintainer: ASTOS
+description: ASTOS — Abstract Syntax Tree Observer Service. Mapa 3D offline do repositorio + queries baratas para IAs.
+license: MIT
+section: utils
+contents:
+  - src: dist-linux/astos
+    dst: /usr/local/bin/astos

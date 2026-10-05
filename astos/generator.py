@@ -158,6 +158,7 @@ html, body {{ margin: 0; height: 100%; background: var(--bg); color: var(--txt);
 <div id="topbar">
   <span class="logo">ASTOS // OBSERVER</span>
   <span class="sub">3D IMERSIVO · {n_count} NÓS · {e_count} ARESTAS · 100% OFFLINE</span>
+  <a class="hbtn" id="btn-city" href="city.html" title="Palácio do código (metáfora Makepad: blocos por tamanho)" style="text-decoration:none">[ 🏛 PALÁCIO ]</a>
   <button class="hbtn on" id="btn-rgb" title="Fita RGB animada percorrendo as arestas">[ FLUXO RGB ]</button>
   <button class="hbtn on" id="btn-orbit" title="Rotação orbital contínua">[ ÓRBITA ]</button>
   <button class="hbtn" id="btn-freeze" title="Congela tudo: física + órbita (atalho: espaço)">[ ❄ CONGELAR ]</button>
@@ -732,16 +733,26 @@ def _short_defs(defs: list[dict], cap: int = 12) -> str:
     return s
 
 
-def render_map_md(graph: dict) -> str:
+COMPACT_LIM = 300  # acima disso o map.md sai compacto sozinho (use --no-compact p/ forçar cheio)
+
+
+def render_map_md(graph: dict, compact: bool | None = None) -> str:
     """Resumo compacto do repositório, desenhado para consumo por agentes de IA.
 
-    Uma linha por arquivo (caminho, linguagem, grau, dependências, símbolos
-    com linha e chamadas resolvidas) + ranking de hubs + fluxo de chamadas.
+    Índice tiny (hubs + capabilities + como consultar) + uma linha por arquivo
+    (caminho, linguagem, grau, dependências, símbolos com linha, caps de
+    hardware e chamadas resolvidas) + ranking de hubs + fluxo de chamadas.
+
+    Modo compacto (auto acima de COMPACT_LIM arquivos, ou --compact): só o
+    índice + risks + fatias — sem as linhas por arquivo. Queries cobrem o resto.
     """
     meta = graph.get("meta", {})
     nodes = graph.get("nodes", [])
     links = graph.get("links", [])
     calls = graph.get("call_edges", [])
+    capabilities = graph.get("capabilities", {}) or {}
+    if compact is None:
+        compact = len(nodes) > COMPACT_LIM
     root = Path(str(meta.get("root", "."))).name or "repo"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     langs = ", ".join(meta.get("langs", [])) or "—"
@@ -758,7 +769,8 @@ def render_map_md(graph: dict) -> str:
     L = [f"# ASTOS MAP — {root}",
          f"> Gerado por `astos` em {now}. {len(nodes)} arquivos · "
          f"{len(links)} dependências · {len(calls)} chamadas inter-arquivo · langs: {langs}.",
-         "> Se desatualizado: `astos -a`. Detalhe: `.astos/graph.json`. Visual humano: `.astos/index.html`.",
+         "> Se desatualizado: `astos -f` (atualiza sem abrir o navegador). Detalhe: `.astos/graph.json`. Visual humano: `.astos/index.html` + `.astos/city.html` (palácio).",
+         "> Queries baratas (use em vez de grep): `astos q --symbol X` · `astos q --cap camera` · `astos trace --from A --to B` · `astos impact --file F` · `astos caps` · `astos hubs` · `astos risks` · `astos slice <pasta>` · `astos changed` · `astos status` · `astos explain --symbol X` · `astos hotspots` · `astos dead` · `astos tests --file X`.",
          "",
          "## HUBS (maior degree centrality)"]
     for n in nodes[:15]:
@@ -768,9 +780,30 @@ def render_map_md(graph: dict) -> str:
         if len(deps) > 8:
             extra += f" (+{len(deps) - 8})"
         L.append(f"- `{n['file']}` [{n.get('lang', '?')}] deg={n.get('deg', 0)}{extra}")
+    if capabilities:
+        L += ["", "## CAPABILITIES (hardware/plataforma — quem fala com o quê)"]
+        for cap in sorted(capabilities):
+            files = [f for f in capabilities[cap] if not f.startswith("manifest:")][:12]
+            manifs = [f[len("manifest:"):] for f in capabilities[cap] if f.startswith("manifest:")][:6]
+            line = f"- `{cap}`: " + ", ".join(f"`{f}`" for f in files) if files else f"- `{cap}`:"
+            if manifs:
+                line += (" · " if files else "") + "manifest: " + ", ".join(f"`{m}`" for m in manifs)
+            extra_n = len(capabilities[cap]) - len(files) - len(manifs)
+            if extra_n > 0:
+                line += f" (+{extra_n})"
+            L.append(line)
     L.append("")
-    L.append("## ARQUIVOS")
+    if compact:
+        mods = sorted({n.get("file", "").split("/")[0] for n in nodes if n.get("file")})
+        L.append(f"## MODO COMPACTO ({len(nodes)} arquivos — detalhe por arquivo em `.astos/graph.json`)")
+        L.append("fatias (leia só o que precisa): " +
+                 ", ".join(f"`astos slice {m}`" for m in mods[:20]))
+        L.append("")
+    else:
+        L.append("## ARQUIVOS")
     for n in nodes:
+        if compact:
+            break
         segs = [f"`{n['file']}` [{n.get('lang', '?')}] deg={n.get('deg', 0)}"]
         deps = [by_id[d]["file"] for d in adj.get(n["id"], []) if d in by_id]
         if deps:
@@ -781,6 +814,15 @@ def render_map_md(graph: dict) -> str:
         exts = list(n.get("externals", []))[:6]
         if exts:
             segs.append("ext: " + ", ".join(f"`{e}`" for e in exts))
+        if n.get("caps"):
+            segs.append("caps: " + ",".join(n["caps"][:6]))
+        if n.get("changed"):
+            segs.append("●changed")
+        if n.get("entry"):
+            segs.append("entry")
+        if n.get("todo_n"):
+            ex = (n.get("todo_ex", []) or [""])[0][:60]
+            segs.append(f"todo:{n['todo_n']}" + (f"({ex})" if ex else ""))
         if n.get("defs"):
             segs.append("def: " + _short_defs(n["defs"]))
         src_calls = calls_by_src.get(n["id"], [])[:8]
@@ -789,8 +831,40 @@ def render_map_md(graph: dict) -> str:
                 f"{c}()>`{by_id[t]['file']}`" if t in by_id else f"{c}()"
                 for c, t in src_calls))
         L.append("- " + " :: ".join(segs))
-    if calls:
-        L += ["", "## FLUXO (chamadas Python entre arquivos, top 30)"]
+    risks = graph.get("risks", {}) or {}
+    if any(risks.get(k) for k in ("gods", "cycles", "todos", "fan_in", "fan_out", "entries", "orphans")):
+        L += ["", "## RISKS (onde o bug provavelmente mora — comece por aqui)"]
+        if risks.get("gods"):
+            L.append("god files (grande/conectado demais): " + ", ".join(
+                f"`{g['file']}`(loc={g['loc']},syms={g['symbols']},deg={g['deg']})"
+                for g in risks["gods"][:8]))
+        if risks.get("cycles"):
+            for cyc in risks["cycles"][:5]:
+                L.append("ciclo: " + " -> ".join(f"`{x}`" for x in cyc))
+        if risks.get("fan_out"):
+            L.append("fan-out alto (depende de muitos): " + ", ".join(
+                f"`{d['file']}`({d['n']})" for d in risks["fan_out"][:8]))
+        if risks.get("fan_in"):
+            L.append("fan-in alto (muitos dependem): " + ", ".join(
+                f"`{d['file']}`({d['n']})" for d in risks["fan_in"][:8]))
+        if risks.get("todos"):
+            L.append("TODOs: " + "; ".join(
+                f"`{t['file']}`x{t['n']}({(t.get('ex') or [''])[0][:50]})"
+                for t in risks["todos"][:8]))
+        if risks.get("entries"):
+            L.append("entrypoints: " + ", ".join(f"`{e}`" for e in risks["entries"][:10]))
+        if risks.get("orphans"):
+            L.append("órfãos (deg=0, possível morto): " + ", ".join(
+                f"`{o}`" for o in risks["orphans"][:10]))
+    dirty = [n["file"] for n in nodes if n.get("changed")]
+    if dirty:
+        L += ["", "## CHANGED (sujos no git — debugue aqui primeiro)"]
+        for f in dirty[:20]:
+            L.append(f"- `{f}`")
+        if len(dirty) > 20:
+            L.append(f"- (+{len(dirty) - 20} outros — `astos changed` lista tudo)")
+    if calls and not compact:
+        L += ["", "## FLUXO (chamadas entre arquivos, top 30)"]
         for s, t, name in calls[:30]:
             sf = by_id.get(s, {}).get("file", s)
             tf = by_id.get(t, {}).get("file", t)
@@ -799,8 +873,253 @@ def render_map_md(graph: dict) -> str:
     return "\n".join(L)
 
 
-def generate_map(output_path: str | Path, graph: dict) -> Path:
+def generate_map(output_path: str | Path, graph: dict,
+                 compact: bool | None = None) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_map_md(graph), encoding="utf-8")
+    output_path.write_text(render_map_md(graph, compact=compact), encoding="utf-8")
+    if compact is None:
+        compact = len(graph.get("nodes", [])) > COMPACT_LIM
+    graph.setdefault("meta", {})["map_mode"] = "compact" if compact else "full"
+    return output_path
+
+
+def _city_height(n: dict) -> float:
+    loc = int(n.get("loc", 0) or 0)
+    syms = int(n.get("symbols", 0) or 0)
+    deg = int(n.get("deg", 0) or 0)
+    return round(4 + min(loc, 3000) / 55 + min(syms, 60) * 0.7 + min(deg, 25) * 0.5, 2)
+
+
+def render_city_html(graph: dict) -> str:
+    """Palácio do código (metáfora Makepad, gerada em Python).
+
+    Placa de circuito: pastas são quadras coladas lado a lado numa placa
+    única, arquivos são blocos (altura ~ loc + símbolos + grau, maiores no
+    centro da quadra), trilhas cyan = dependências entre blocos.
+    Nomes só nos 12 maiores (botão NOMES liga/desliga); clique no bloco abre
+    a ficha do arquivo. Não altera o grafo 3D — visão irmã, mesmo Three.js.
+    """
+    three_js, orbit_js = _read_vendor()
+    nodes = graph.get("nodes", []) or []
+    links = graph.get("links", []) or []
+    mods = graph.get("mods", {}) or {}
+    meta = graph.get("meta", {})
+    root_name = html.escape(Path(str(meta.get("root", "."))).name or "repo")
+
+    city = []
+    for n in nodes:
+        city.append({
+            "id": n.get("id"), "label": n.get("label"), "file": n.get("file"),
+            "lang": n.get("lang"), "mod": n.get("mod"), "color": n.get("color"),
+            "deg": n.get("deg", 0), "symbols": n.get("symbols", 0),
+            "loc": int(n.get("loc", 0) or 0), "caps": list(n.get("caps", []))[:8],
+            "h": _city_height(n),
+            "todo_n": int(n.get("todo_n", 0) or 0),
+            "entry": bool(n.get("entry", False)),
+            "defs": (n.get("defs", []) or [])[:10],
+        })
+    city.sort(key=lambda d: -d["h"])
+    city_json = json.dumps(city, ensure_ascii=False)
+    links_json = json.dumps(links, ensure_ascii=False)
+    mods_json = json.dumps(mods, ensure_ascii=False)
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASTOS // {root_name} — Palácio do Código</title>
+<style>
+:root {{ --bg:#04060e; --panel:rgba(8,12,24,.92); --line:#1e293b; --txt:#dbeafe; --dim:#64748b; --cyan:#22d3ee; --mag:#f472b6; }}
+* {{ box-sizing:border-box; }} html,body {{ margin:0; height:100%; background:var(--bg); color:var(--txt);
+font-family:Consolas,monospace; overflow:hidden; }}
+#stage {{ position:fixed; inset:0; }} #net3d {{ position:absolute; inset:0; }}
+#topbar {{ position:fixed; top:0; left:0; right:0; z-index:100; display:flex; gap:12px; align-items:center; padding:10px 16px; flex-wrap:wrap;
+background:linear-gradient(180deg,rgba(4,6,14,.96),rgba(4,6,14,.55) 80%,transparent); border-bottom:1px solid rgba(34,211,238,.28); }}
+.logo {{ color:var(--cyan); font-weight:bold; letter-spacing:2px; }} .sub {{ color:var(--dim); font-size:11px; }}
+.hbtn {{ border:1px solid var(--cyan); background:rgba(15,23,42,.85); color:var(--cyan); font-family:inherit; font-size:11px; padding:7px 12px; border-radius:4px; cursor:pointer; text-decoration:none; }}
+#panel {{ position:fixed; top:64px; right:12px; width:300px; z-index:100; background:var(--panel); border:1px solid rgba(34,211,238,.35); border-radius:8px; padding:12px; }}
+#panel input,select {{ width:100%; background:#0b1120; border:1px solid var(--line); color:var(--txt); font-family:inherit; font-size:12px; padding:7px 9px; border-radius:4px; margin-top:4px; }}
+#panel label {{ font-size:11px; color:var(--dim); display:block; margin-top:8px; }}
+#info {{ position:fixed; left:12px; bottom:12px; z-index:100; width:420px; max-width:calc(100vw - 24px); max-height:46vh; overflow:auto;
+background:rgba(8,12,24,.94); border:1px solid rgba(244,114,182,.55); border-radius:8px; padding:12px 14px; font-size:12px; display:none; }}
+#info.show {{ display:block; }} #info .t {{ color:var(--mag); font-weight:bold; }} #info .r {{ color:var(--dim); line-height:1.7; word-break:break-word; }}
+#hint {{ position:fixed; bottom:12px; left:50%; transform:translateX(-50%); z-index:99; font-size:11px; color:var(--dim); background:rgba(8,12,24,.7); border:1px solid var(--line); padding:5px 12px; border-radius:20px; }}
+</style>
+</head>
+<body>
+<div id="stage"><div id="net3d"></div></div>
+<div id="topbar"><span class="logo">ASTOS // PALÁCIO</span><span class="sub">{len(city)} BLOCOS · PLACA DE CIRCUITO · ALTURA=LINHAS · 100% OFFLINE</span>
+<a class="hbtn" href="index.html">[ ◀ GRAFO ]</a><button class="hbtn on" id="btn-names">[ NOMES ]</button><button class="hbtn on" id="btn-traces">[ TRILHAS ]</button></div>
+<div id="panel"><label>busca de bloco</label><input id="search" placeholder="ex: camera, service..." autocomplete="off">
+<label>capability (hardware)</label><select id="cap"><option value="">todas</option></select>
+<label style="margin-top:8px">placa única: quadras coladas por pasta · altura = loc + símbolos + grau · trilhas = dependências · clique no bloco = ficha</label></div>
+<div id="info"><div class="t" id="info-t"></div><div class="r" id="info-r"></div></div>
+<div id="hint">arraste: orbitar · scroll: zoom · botão direito: pan · clique num bloco: HUD</div>
+<script>{three_js}</script>
+<script>{orbit_js}</script>
+<script>
+"use strict";
+const CITY = {city_json}; const LINKS = {links_json}; const MODS = {mods_json};
+const $ = (id) => document.getElementById(id);
+const byId = {{}}; CITY.forEach(b => byId[b.id] = b);
+const adj = {{}}; LINKS.forEach(([s,t]) => {{ (adj[s]=adj[s]||[]).push(t); (adj[t]=adj[t]||[]).push(s); }});
+const caps = [...new Set(CITY.flatMap(b => b.caps || []))].sort();
+caps.forEach(c => {{ const o=document.createElement('option'); o.value=c; o.textContent=c; $('cap').appendChild(o); }});
+let filterCap = "", query = "";
+const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x04060e, 0.0011);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 9000);
+camera.position.set(0, 260, 420);
+const renderer = new THREE.WebGLRenderer({{antialias:true, alpha:true}});
+renderer.setSize(innerWidth, innerHeight); $('net3d').appendChild(renderer.domElement);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.06; controls.autoRotate = true; controls.autoRotateSpeed = 0.8;
+scene.add(new THREE.AmbientLight(0x8899bb, 0.85));
+const key = new THREE.PointLight(0x22d3ee, 1.1, 0); key.position.set(300,500,300); scene.add(key);
+// ---- CIDADE: cada pasta (mod) é uma quadra, arquivos são blocos ----
+// (corrige bug antigo: espiral punha os primeiros blocos todos no centro)
+const P = {{}}; const labelSprites = {{}}; const STEP = 30;
+function makeLabel(t, color) {{
+  const c = document.createElement('canvas'); const x = c.getContext('2d');
+  x.font = 'bold 24px monospace'; const w = Math.ceil(x.measureText(t).width) + 24;
+  c.width = w; c.height = 38; x.fillStyle = 'rgba(4,8,18,.85)'; x.fillRect(0,0,w,38);
+  x.strokeStyle = color; x.strokeRect(1,1,w-2,36); x.font = 'bold 24px monospace'; x.fillStyle = '#eaf6ff'; x.fillText(t, 12, 26);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({{ map:new THREE.CanvasTexture(c), transparent:true, depthWrite:false }}));
+  sp.scale.set(w*0.26, 38*0.26, 1); return sp;
+}}
+const districts = {{}};
+CITY.forEach(b => {{ (districts[b.mod] = districts[b.mod] || []).push(b); }});
+Object.values(districts).forEach(arr => arr.sort((a, b) => b.h - a.h));
+const dnames = Object.keys(districts).sort((a, b) => districts[b].length - districts[a].length);
+const GAP = 5; // quadras coladas: só a junta de solda entre as placas
+const rect = {{}}; // m -> {{wdt, dep, cols, rows}}
+dnames.forEach(m => {{
+  const n = districts[m].length, cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
+  rect[m] = {{ wdt: cols * STEP + 26, dep: rows * STEP + 26, cols, rows }};
+}});
+// empacota as quadras em linhas: a cidade inteira vira UMA placa de circuito
+const DCOLS = Math.ceil(Math.sqrt(dnames.length));
+let bx = 0, bz = 0, rowH = 0, bcol = 0, boardW = 0;
+const dpos = {{}};
+dnames.forEach(m => {{
+  if (bcol >= DCOLS) {{ bcol = 0; bx = 0; bz += rowH + GAP; rowH = 0; }}
+  dpos[m] = {{ x: bx + rect[m].wdt / 2, z: bz + rect[m].dep / 2 }};
+  bx += rect[m].wdt + GAP;
+  if (rect[m].dep > rowH) rowH = rect[m].dep;
+  if (bx > boardW) boardW = bx;
+  bcol++;
+}});
+const boardH = bz + rowH;
+const ox = boardW / 2, oz = boardH / 2; // centraliza a placa na origem
+const half = Math.max(boardW, boardH) / 2;
+camera.position.set(0, half * 0.9 + 140, half * 1.2 + 200);
+const gridSize = Math.ceil(Math.max(boardW, boardH) + 500);
+const grid = new THREE.GridHelper(gridSize, Math.ceil(gridSize / 20), 0x164e63, 0x0f172a);
+grid.position.y = -2.5; scene.add(grid);
+dnames.forEach((m) => {{
+  const cx = dpos[m].x - ox, cz = dpos[m].z - oz;
+  const arr = districts[m];
+  const cols = rect[m].cols, rows = rect[m].rows;
+  const cells = [];
+  for (let rr = 0; rr < rows; rr++) for (let cc2 = 0; cc2 < cols; cc2++) cells.push([cc2, rr]);
+  const cc = (cols - 1) / 2, rc = (rows - 1) / 2;
+  cells.sort((p1, p2) => Math.hypot(p1[0]-cc, p1[1]-rc) - Math.hypot(p2[0]-cc, p2[1]-rc));
+  const wdt = rect[m].wdt, dep = rect[m].dep;
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(wdt, 2, dep),
+    new THREE.MeshLambertMaterial({{ color: 0x0b1226 }}));
+  plate.position.set(cx, -1, cz); scene.add(plate);
+  plate.add(new THREE.LineSegments(new THREE.EdgesGeometry(plate.geometry),
+    new THREE.LineBasicMaterial({{ color: new THREE.Color(arr[0].color) }})));
+  const mlab = makeLabel('▤ ' + m + ' (' + arr.length + ')', arr[0].color);
+  mlab.position.set(cx, 16, cz - dep/2 - 8); mlab.scale.multiplyScalar(1.3); scene.add(mlab);
+  labelSprites['mod:' + m] = mlab;
+  arr.forEach((b, i) => {{
+    const cell = cells[i] || [0, 0];
+    const x = cx + (cell[0] - cc) * STEP, z = cz + (cell[1] - rc) * STEP;
+    const w = 9 + Math.min(b.symbols, 40) * 0.12, d = 9 + Math.min(b.symbols, 40) * 0.12;
+    const geo = new THREE.BoxGeometry(w, b.h, d);
+    const mat = new THREE.MeshLambertMaterial({{ color: new THREE.Color(b.color), emissive: new THREE.Color(b.color).multiplyScalar(0.18) }});
+    const mesh = new THREE.Mesh(geo, mat); mesh.position.set(x, b.h/2, z); mesh.userData.id = b.id;
+    mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+      new THREE.LineBasicMaterial({{ color: 0xffffff, transparent:true, opacity:0.18 }})));
+    scene.add(mesh); P[b.id] = {{ x, z, w, d, h: b.h, mesh, data: b }};
+  }});
+}});
+// trilhas do circuito: dependências entre blocos (top 400, somem no filtro)
+const traces = [];
+LINKS.slice(0, 400).forEach(([s, t]) => {{
+  if (s === t || !P[s] || !P[t]) return;
+  const g = new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(P[s].x, 1.2, P[s].z), new THREE.Vector3(P[t].x, 1.2, P[t].z)]);
+  const ln = new THREE.Line(g, new THREE.LineBasicMaterial({{ color: 0x22d3ee, transparent: true, opacity: 0.3 }}));
+  scene.add(ln); traces.push({{ s, t, ln }});
+}});
+// nomes: só os 12 maiores + quadras (botão NOMES liga/desliga)
+let namesOn = true, trailsOn = true;
+CITY.slice(0, 12).forEach(b => {{
+  const sp = makeLabel(b.label, b.color); const p = P[b.id];
+  if (!p) return;
+  sp.position.set(p.x, p.h + 8, p.z); sp.userData.nodeId = b.id; scene.add(sp);
+  labelSprites[b.id] = sp;
+}});
+$('btn-names').onclick = (e) => {{
+  namesOn = !namesOn;
+  e.target.textContent = namesOn ? '[ NOMES ]' : '[ SEM NOMES ]';
+  e.target.classList.toggle('on', namesOn);
+  refresh();
+}};
+$('btn-traces').onclick = (e) => {{
+  trailsOn = !trailsOn;
+  e.target.textContent = trailsOn ? '[ TRILHAS ]' : '[ SEM TRILHAS ]';
+  e.target.classList.toggle('on', trailsOn);
+  refresh();
+}};
+function visible(b) {{
+  if (filterCap && !(b.caps||[]).includes(filterCap)) return false;
+  if (query && !(b.label.toLowerCase().includes(query) || b.file.toLowerCase().includes(query))) return false;
+  return true;
+}}
+function refresh() {{
+  CITY.forEach(b => {{ if (P[b.id]) P[b.id].mesh.visible = visible(b); }});
+  Object.keys(labelSprites).forEach(k => {{
+    if (k.indexOf('mod:') === 0) return; // quadras sempre nomeadas
+    const b = byId[k];
+    labelSprites[k].visible = namesOn && !!b && visible(b);
+  }});
+  traces.forEach(tr => {{
+    tr.ln.visible = trailsOn && !!byId[tr.s] && !!byId[tr.t] && visible(byId[tr.s]) && visible(byId[tr.t]);
+  }});
+}}
+$('search').oninput = (e) => {{ query = e.target.value.trim().toLowerCase(); refresh(); }};
+$('cap').onchange = (e) => {{ filterCap = e.target.value; refresh(); }};
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(); let downAt = 0;
+renderer.domElement.addEventListener('pointerdown', () => downAt = performance.now());
+renderer.domElement.addEventListener('pointerup', (ev) => {{
+  if (performance.now() - downAt > 260) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((ev.clientX - r.left)/r.width)*2-1; mouse.y = -((ev.clientY-r.top)/r.height)*2+1;
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(Object.values(P).filter(p=>p.mesh.visible).map(p=>p.mesh));
+  if (!hits.length) {{ $('info').classList.remove('show'); return; }}
+  const b = byId[hits[0].object.userData.id]; if (!b) return;
+  $('info-t').textContent = '▣ ' + b.label + (b.entry ? ' · ⚑ entry' : '');
+  const viz = (adj[b.id]||[]).slice(0,10).map(v => byId[v] ? byId[v].label : v).join(', ') || '—';
+  const defs = (b.defs||[]).slice(0,6).map(d => d.n + ':L' + d.l).join(', ') || '—';
+  $('info-r').innerHTML = 'arquivo: <b style="color:#fff">'+b.file+'</b><br>quadra: <b style="color:#fff">'+b.mod+'</b> · loc: <b style="color:#fff">'+b.loc+'</b> · símbolos: <b style="color:#fff">'+b.symbols+'</b> · grau: <b style="color:#fff">'+b.deg+'</b>' +
+    (b.todo_n ? ' · todo:<b style="color:#fbbf24">'+b.todo_n+'</b>' : '') + '<br>'
+    + 'caps: <b style="color:#22d3ee">'+((b.caps||[]).join(', ')||'—')+'</b><br>defs: '+defs+'<br>vizinhos: '+viz;
+  $('info').classList.add('show');
+}});
+addEventListener('resize', () => {{ camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }});
+(function loop() {{ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); }})();
+</script>
+</body>
+</html>"""
+
+
+def generate_city(output_path: str | Path, graph: dict) -> Path:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_city_html(graph), encoding="utf-8")
     return output_path

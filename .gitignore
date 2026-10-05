@@ -1,6 +1,7 @@
 .astos/
 dist/
 build/
+*.spec
 *.egg-info/
 __pycache__/
 *.pyc
